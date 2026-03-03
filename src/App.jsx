@@ -126,7 +126,7 @@ function Chessboard({ fen, flipped }) {
           <div key={ri} style={{ display: "flex", alignItems: "center" }}>
             <span style={{
               width: 18, textAlign: "center", fontSize: 11,
-              color: "rgba(255,255,255,0.38)", fontFamily: "monospace",
+              color: "rgba(255,255,255,0.65)", fontFamily: "monospace",
             }}>
               {flipped ? rankLabels[7 - ri] : rankLabels[ri]}
             </span>
@@ -161,7 +161,7 @@ function Chessboard({ fen, flipped }) {
           {files.map((fi) => (
             <span key={fi} style={{
               width: sqSize, textAlign: "center",
-              fontSize: 11, color: "rgba(255,255,255,0.38)",
+              fontSize: 11, color: "rgba(255,255,255,0.65)",
               fontFamily: "monospace", paddingBottom: 3,
             }}>
               {fileLabels[fi]}
@@ -415,8 +415,14 @@ function HomePage({ onPlay, puzzles }) {
         </div>
 
         {/* Ghost board */}
-        <div className="board-float" style={{ flexShrink: 0 }}>
-          <GhostBoard size={50} opacity={0.14} />
+        <div className="board-float" style={{ flexShrink: 0, position: "relative" }}>
+          <Chessboard fen="rnb2r1k/2nq1pb1/pp1p3p/2pPp1pP/N1P1P3/P2BNPP1/1P4K1/R1BQ3R b - - 3 22" flipped={false} />
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "rgba(20,18,16,0.5)",
+            borderRadius: 4,
+            pointerEvents: "none",
+          }} />
         </div>
       </section>
 
@@ -454,16 +460,16 @@ function HomePage({ onPlay, puzzles }) {
 
       {/* Quote */}
       <div className="anim-6" style={{ position: "relative", zIndex: 2, maxWidth: 1180, margin: "0 auto", padding: "0 44px 80px" }}>
-        <blockquote style={{ borderLeft: "2px solid rgba(200,168,75,0.35)", paddingLeft: 28, maxWidth: 620 }}>
+        <blockquote style={{ borderLeft: "2px solid rgba(200,168,75,0.35)", paddingLeft: 28, maxWidth: 620, margin: "0 auto" }}>
           <p style={{
             fontFamily: "'Playfair Display', Georgia, serif",
             fontSize: "clamp(17px, 2vw, 20px)", fontStyle: "italic",
-            lineHeight: 1.65, color: "rgba(232,224,208,0.45)", margin: 0,
+            lineHeight: 1.65, color: "rgba(232,224,208,0.75)", margin: 0,
           }}>
             "Chess is not about finding the best move. It is about forming the right plan."
           </p>
           <footer style={{
-            marginTop: 12, fontSize: 13, color: "rgba(255,255,255,0.22)",
+            marginTop: 12, fontSize: 13, color: "rgba(255,255,255,0.5)",
             letterSpacing: "0.08em", textTransform: "uppercase",
           }}>
             — Siegbert Tarrasch
@@ -477,7 +483,7 @@ function HomePage({ onPlay, puzzles }) {
         borderTop: "1px solid rgba(255,255,255,0.05)", padding: "22px 44px",
         display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12,
       }}>
-        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.18)", letterSpacing: "0.05em" }}>
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>
           Planum — train the part of chess that matters most
         </span>
         <button
@@ -528,7 +534,7 @@ function PuzzlePage({ onHome, puzzles }) {
           display: "flex", alignItems: "center", justifyContent: "space-between", height: 64,
         }}>
           <Logo onClick={onHome} />
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
             Puzzle {idx + 1} / {puzzles.length}
           </span>
         </div>
@@ -548,7 +554,7 @@ function PuzzlePage({ onHome, puzzles }) {
                   background: flipped ? "#2a2a2a" : "#f0f0eb",
                   border: "2px solid rgba(255,255,255,0.22)",
                 }} />
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", letterSpacing: "0.06em" }}>
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", letterSpacing: "0.06em" }}>
                   {puzzle.sideToMove === "white" ? "White" : "Black"} to plan
                 </span>
               </div>
@@ -556,18 +562,9 @@ function PuzzlePage({ onHome, puzzles }) {
 
             {/* Puzzle UI */}
             <div style={{ flex: "1 1 320px", minWidth: 280 }}>
-              {/* Theme badge + progress dots */}
+              {/* Theme badge */}
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
                 <ThemeBadge theme={puzzle.theme} />
-                <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                  {puzzles.map((_, i) => (
-                    <div key={i} style={{
-                      width: 8, height: 8, borderRadius: "50%",
-                      background: i <= idx ? "#c8a84b" : "rgba(255,255,255,0.11)",
-                      transition: "background 0.3s ease",
-                    }} />
-                  ))}
-                </div>
               </div>
 
               <h2 style={{
@@ -687,7 +684,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    console.log("useEffect running");
     fetchPuzzles().then((data) => {
       setPuzzles(data);
       setLoading(false);
