@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { PUZZLES } from "./puzzles";
+import { useState, useEffect } from "react";
+import { fetchPuzzles } from "./puzzles";
 
 // ============================================================
 // Constants
@@ -305,7 +305,7 @@ function ProgressBar({ current, total }) {
 // ============================================================
 // HomePage
 // ============================================================
-function HomePage({ onPlay }) {
+function HomePage({ onPlay, puzzles }) {
   return (
     <div style={{
       minHeight: "100vh", background: "#141210",
@@ -393,20 +393,23 @@ function HomePage({ onPlay }) {
           {/* CTA */}
           <div className="anim-4" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
             <button
-              onClick={onPlay}
+              onClick={puzzles.length ? onPlay : undefined}
               className="play-btn"
               style={{
                 display: "flex", alignItems: "center", gap: 11,
-                padding: "17px 38px", background: "#c8a84b", color: "#141210",
+                padding: "17px 38px",
+                background: puzzles.length ? "#c8a84b" : "rgba(200,168,75,0.35)",
+                color: "#141210",
                 border: "none", borderRadius: 4, fontSize: 18, fontWeight: 700,
-                letterSpacing: "0.07em", fontFamily: "'Playfair Display', Georgia, serif", cursor: "pointer",
+                letterSpacing: "0.07em", fontFamily: "'Playfair Display', Georgia, serif",
+                cursor: puzzles.length ? "pointer" : "not-allowed",
               }}
             >
-              <span>Begin Training</span>
-              <span style={{ fontSize: 21, marginTop: 1 }}>→</span>
+              <span>{puzzles.length ? "Begin Training" : "Loading..."}</span>
+              {puzzles.length > 0 && <span style={{ fontSize: 21, marginTop: 1 }}>→</span>}
             </button>
-            <p style={{ fontSize: 14.5, color: "rgba(255,255,255,0.28)", letterSpacing: "0.04em", margin: 0 }}>
-              {PUZZLES.length} puzzles &nbsp;·&nbsp; free &nbsp;·&nbsp; no account needed
+            <p style={{ fontSize: 14.5, color: "rgba(255,255,255,0.55)", letterSpacing: "0.04em", margin: 0 }}>
+              {puzzles.length} puzzles &nbsp;·&nbsp; free &nbsp;·&nbsp; no account needed
             </p>
           </div>
         </div>
@@ -497,15 +500,17 @@ function HomePage({ onPlay }) {
 // ============================================================
 // PuzzlePage
 // ============================================================
-function PuzzlePage({ onHome }) {
+function PuzzlePage({ onHome, puzzles }) {
   const [idx, setIdx]               = useState(0);
   const [selectedId, setSelected]   = useState(null);
   const [submitted, setSubmitted]   = useState(false);
   const [inspectedId, setInspected] = useState(null);
 
-  const puzzle    = PUZZLES[idx];
+  if (!puzzles.length) return null;
+
+  const puzzle    = puzzles[idx];
   const isCorrect = submitted && puzzle.options.find((o) => o.id === selectedId)?.correct;
-  const isLast    = idx === PUZZLES.length - 1;
+  const isLast    = idx === puzzles.length - 1;
   const flipped   = puzzle.sideToMove === "black";
 
   function next()    { setIdx((i) => i + 1); setSelected(null); setSubmitted(false); setInspected(null); }
@@ -524,14 +529,14 @@ function PuzzlePage({ onHome }) {
         }}>
           <Logo onClick={onHome} />
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-            Puzzle {idx + 1} / {PUZZLES.length}
+            Puzzle {idx + 1} / {puzzles.length}
           </span>
         </div>
       </header>
 
       <main style={{ padding: "36px 36px 80px" }}>
         <div style={{ maxWidth: 1180, margin: "0 auto" }}>
-          <ProgressBar current={idx} total={PUZZLES.length} />
+          <ProgressBar current={idx} total={puzzles.length} />
 
           <div style={{ display: "flex", gap: 56, alignItems: "flex-start", flexWrap: "wrap" }}>
             {/* Board */}
@@ -555,7 +560,7 @@ function PuzzlePage({ onHome }) {
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
                 <ThemeBadge theme={puzzle.theme} />
                 <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                  {PUZZLES.map((_, i) => (
+                  {puzzles.map((_, i) => (
                     <div key={i} style={{
                       width: 8, height: 8, borderRadius: "50%",
                       background: i <= idx ? "#c8a84b" : "rgba(255,255,255,0.11)",
@@ -651,7 +656,7 @@ function PuzzlePage({ onHome }) {
                         color: "rgba(255,255,255,0.35)", fontSize: 15.5,
                         marginBottom: 14, fontStyle: "italic", fontWeight: 300,
                       }}>
-                        You've worked through all {PUZZLES.length} puzzles. Well played.
+                        You've worked through all {puzzles.length} puzzles. Well played.
                       </p>
                       <button onClick={restart} className="next-btn" style={{
                         width: "100%", padding: "13px", background: "transparent", color: "#c8a84b",
@@ -676,12 +681,33 @@ function PuzzlePage({ onHome }) {
 // App — screen router
 // ============================================================
 export default function App() {
-  const [screen, setScreen] = useState("home");
-  const [key, setKey] = useState(0);
+  const [screen, setScreen]   = useState("home");
+  const [key, setKey]         = useState(0);
+  const [puzzles, setPuzzles] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    console.log("useEffect running");
+    fetchPuzzles().then((data) => {
+      setPuzzles(data);
+      setLoading(false);
+    });
+  }, []);
 
   function goPlay() { setKey((k) => k + 1); setScreen("puzzle"); }
   function goHome() { setKey((k) => k + 1); setScreen("home"); }
 
-  if (screen === "home") return <HomePage key={key} onPlay={goPlay} />;
-  return <PuzzlePage key={key} onHome={goHome} />;
+  if (loading) return (
+    <div style={{
+      minHeight: "100vh", background: "#141210",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "'Crimson Pro', Georgia, serif",
+      color: "rgba(255,255,255,0.45)", fontSize: 18, letterSpacing: "0.08em",
+    }}>
+      Loading puzzles...
+    </div>
+  );
+
+  if (screen === "home") return <HomePage key={key} onPlay={goPlay} puzzles={puzzles} />;
+  return <PuzzlePage key={key} onHome={goHome} puzzles={puzzles} />;
 }
