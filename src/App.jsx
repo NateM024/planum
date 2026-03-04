@@ -419,7 +419,7 @@ function HomePage({ onPlay, puzzles }) {
           <Chessboard fen="rnb2r1k/2nq1pb1/pp1p3p/2pPp1pP/N1P1P3/P2BNPP1/1P4K1/R1BQ3R b - - 3 22" flipped={false} />
           <div style={{
             position: "absolute", inset: 0,
-            background: "rgba(20,18,16,0.5)",
+            background: "rgba(20,18,16,0.72)",
             borderRadius: 4,
             pointerEvents: "none",
           }} />
@@ -664,6 +664,25 @@ function PuzzlePage({ onHome, puzzles }) {
                       </button>
                     </div>
                   )}
+
+                  {/* Lichess analysis link */}
+                  <a
+                    href={`https://lichess.org/analysis/fromPosition/${puzzle.fen.replace(/ /g, "_")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "block", textAlign: "center",
+                      marginTop: 12, fontSize: 13,
+                      color: "rgba(255,255,255,0.35)",
+                      letterSpacing: "0.06em",
+                      textDecoration: "none",
+                      transition: "color 0.2s",
+                    }}
+                    onMouseEnter={e => e.target.style.color = "rgba(255,255,255,0.7)"}
+                    onMouseLeave={e => e.target.style.color = "rgba(255,255,255,0.35)"}
+                  >
+                    Analyse on Lichess ↗
+                  </a>
                 </div>
               )}
             </div>
