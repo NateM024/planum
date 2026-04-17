@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { fetchPuzzles } from "./puzzles";
+import { pipeline } from "@xenova/transformers";
+
 
 // ============================================================
 // Constants
@@ -305,7 +307,7 @@ function ProgressBar({ current, total }) {
 // ============================================================
 // HomePage
 // ============================================================
-function HomePage({ onPlay, puzzles }) {
+function HomePage({ onPlay, onOpenEnded, puzzles }) {
   return (
     <div style={{
       minHeight: "100vh", background: "#141210",
@@ -391,7 +393,7 @@ function HomePage({ onPlay, puzzles }) {
           </p>
 
           {/* CTA */}
-          <div className="anim-4" style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+          <div className="anim-4" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
             <button
               onClick={puzzles.length ? onPlay : undefined}
               className="play-btn"
@@ -405,13 +407,30 @@ function HomePage({ onPlay, puzzles }) {
                 cursor: puzzles.length ? "pointer" : "not-allowed",
               }}
             >
-              <span>{puzzles.length ? "Begin Training" : "Loading..."}</span>
+              <span>{puzzles.length ? "Guided Practice" : "Loading..."}</span>
               {puzzles.length > 0 && <span style={{ fontSize: 21, marginTop: 1 }}>→</span>}
             </button>
-            <p style={{ fontSize: 14.5, color: "rgba(255,255,255,0.55)", letterSpacing: "0.04em", margin: 0 }}>
-              {puzzles.length} puzzles &nbsp;·&nbsp; free &nbsp;·&nbsp; no account needed
-            </p>
+            <button
+              onClick={puzzles.length ? onOpenEnded : undefined}
+              className="play-btn"
+              style={{
+                display: "flex", alignItems: "center", gap: 11,
+                padding: "17px 38px",
+                background: "transparent",
+                color: puzzles.length ? "#c8a84b" : "rgba(200,168,75,0.35)",
+                border: `1px solid ${puzzles.length ? "rgba(200,168,75,0.6)" : "rgba(200,168,75,0.2)"}`,
+                borderRadius: 4, fontSize: 18, fontWeight: 700,
+                letterSpacing: "0.07em", fontFamily: "'Playfair Display', Georgia, serif",
+                cursor: puzzles.length ? "pointer" : "not-allowed",
+              }}
+            >
+              <span>Free Analysis</span>
+              {puzzles.length > 0 && <span style={{ fontSize: 21, marginTop: 1 }}>→</span>}
+            </button>
           </div>
+          <p style={{ fontSize: 14.5, color: "rgba(255,255,255,0.55)", letterSpacing: "0.04em", margin: 0 }}>
+            {puzzles.length} puzzles &nbsp;·&nbsp; free &nbsp;·&nbsp; no account needed
+          </p>
         </div>
 
         {/* Ghost board */}
@@ -486,18 +505,32 @@ function HomePage({ onPlay, puzzles }) {
         <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>
           Planum — train the part of chess that matters most
         </span>
-        <button
-          onClick={onPlay}
-          style={{
-            background: "none", border: "none", cursor: "pointer",
-            fontSize: 13, color: "rgba(200,168,75,0.5)",
-            letterSpacing: "0.08em", textTransform: "uppercase", transition: "color 0.2s",
-          }}
-          onMouseEnter={(e) => (e.target.style.color = "#c8a84b")}
-          onMouseLeave={(e) => (e.target.style.color = "rgba(200,168,75,0.5)")}
-        >
-          Start training →
-        </button>
+        <div style={{ display: "flex", gap: 20 }}>
+          <button
+            onClick={onPlay}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 13, color: "rgba(200,168,75,0.5)",
+              letterSpacing: "0.08em", textTransform: "uppercase", transition: "color 0.2s",
+            }}
+            onMouseEnter={(e) => (e.target.style.color = "#c8a84b")}
+            onMouseLeave={(e) => (e.target.style.color = "rgba(200,168,75,0.5)")}
+          >
+            Guided Practice →
+          </button>
+          <button
+            onClick={onOpenEnded}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              fontSize: 13, color: "rgba(200,168,75,0.5)",
+              letterSpacing: "0.08em", textTransform: "uppercase", transition: "color 0.2s",
+            }}
+            onMouseEnter={(e) => (e.target.style.color = "#c8a84b")}
+            onMouseLeave={(e) => (e.target.style.color = "rgba(200,168,75,0.5)")}
+          >
+            Free Analysis →
+          </button>
+        </div>
       </footer>
     </div>
   );
@@ -694,6 +727,310 @@ function PuzzlePage({ onHome, puzzles }) {
 }
 
 // ============================================================
+// Cosine similarity helper
+// ============================================================
+function cosineSimilarity(a, b) {
+  const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+  const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+  const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+  return dot / (magA * magB);
+}
+
+// ============================================================
+// OpenEndedPuzzlePage
+// ============================================================
+function OpenEndedPuzzlePage({ onHome, puzzles }) {
+  const [idx, setIdx]               = useState(0);
+  const [response, setResponse]     = useState("");
+  const [submitted, setSubmitted]   = useState(false);
+  const [results, setResults]       = useState(null); // { passed: bool, matches: [{concept, score, matched}] }
+  const [modelReady, setModelReady] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
+  const [modelStatus, setModelStatus] = useState("Loading model...");
+  const embedderRef = useRef(null);
+
+  if (!puzzles.length) return null;
+
+  const puzzle  = puzzles[idx];
+  const isLast  = idx === puzzles.length - 1;
+  const flipped = puzzle.sideToMove === "black";
+
+  // Load model on mount
+  useEffect(() => {
+    async function loadModel() {
+      try {
+        setModelStatus("Downloading model (first visit only)...");
+        embedderRef.current = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+        setModelReady(true);
+        setModelStatus("Model ready.");
+      } catch (err) {
+        console.error("Model load error:", err);
+        setModelStatus("Failed to load model.");
+      }
+    }
+    loadModel();
+  }, []);
+
+  function next() {
+    setIdx((i) => i + 1);
+    setResponse("");
+    setSubmitted(false);
+    setResults(null);
+  }
+
+  function restart() {
+    setIdx(0);
+    setResponse("");
+    setSubmitted(false);
+    setResults(null);
+  }
+
+  async function handleSubmit() {
+    if (!response.trim() || !modelReady || !puzzle.concept_embeddings) return;
+    setEvaluating(true);
+
+    // Embed the user's response
+    const output = await embedderRef.current(response, { pooling: "mean", normalize: true });
+    const responseEmbedding = Array.from(output.data);
+
+    // Compare against each concept embedding
+    const THRESHOLD = 0.35;
+    const matches = puzzle.concept_embeddings.map((conceptEmbed, i) => {
+      const score = cosineSimilarity(responseEmbedding, conceptEmbed);
+      return {
+        concept: puzzle.concepts[i],
+        score,
+        matched: score >= THRESHOLD,
+      };
+    });
+
+    const matchedCount = matches.filter((m) => m.matched).length;
+    const passed = matchedCount >= Math.ceil(puzzle.concepts.length / 2);
+
+    setResults({ passed, matches });
+    setSubmitted(true);
+    setEvaluating(false);
+  }
+
+  return (
+    <div className="screen-enter" style={{
+      minHeight: "100vh", background: "#141210",
+      color: "#e8e0d0", fontFamily: "'Crimson Pro', Georgia, serif",
+    }}>
+      {/* Header */}
+      <header style={{ borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "0 36px" }}>
+        <div style={{
+          maxWidth: 1180, margin: "0 auto",
+          display: "flex", alignItems: "center", justifyContent: "space-between", height: 64,
+        }}>
+          <Logo onClick={onHome} />
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <span style={{
+              fontSize: 11, color: modelReady ? "rgba(72,187,120,0.7)" : "rgba(255,255,255,0.28)",
+              letterSpacing: "0.08em", textTransform: "uppercase",
+            }}>
+              {modelReady ? "● Model ready" : "○ " + modelStatus}
+            </span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              Puzzle {idx + 1} / {puzzles.length}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <main style={{ padding: "36px 36px 80px" }}>
+        <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+          <ProgressBar current={idx} total={puzzles.length} />
+
+          <div style={{ display: "flex", gap: 56, alignItems: "flex-start", flexWrap: "wrap" }}>
+            {/* Board */}
+            <div style={{ flexShrink: 0 }}>
+              <Chessboard fen={puzzle.fen} flipped={flipped} />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, paddingLeft: 18 }}>
+                <div style={{
+                  width: 11, height: 11, borderRadius: "50%",
+                  background: flipped ? "#2a2a2a" : "#f0f0eb",
+                  border: "2px solid rgba(255,255,255,0.22)",
+                }} />
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", letterSpacing: "0.06em" }}>
+                  {puzzle.sideToMove === "white" ? "White" : "Black"} to plan
+                </span>
+              </div>
+            </div>
+
+            {/* Puzzle UI */}
+            <div style={{ flex: "1 1 320px", minWidth: 280 }}>
+              {/* Theme badge */}
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+                <ThemeBadge theme={puzzle.theme} />
+              </div>
+
+              <h2 style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: 20, lineHeight: 1.5, fontWeight: 400, color: "#f0e8d5", marginBottom: 10,
+              }}>
+                {puzzle.prompt}
+              </h2>
+
+              <p style={{
+                fontSize: 14.5, color: "rgba(255,255,255,0.38)",
+                fontStyle: "italic", marginBottom: 22, lineHeight: 1.6,
+              }}>
+                Describe your plan in your own words. Focus on the strategic idea, not specific moves.
+              </p>
+
+              {/* Text input */}
+              {!submitted && (
+                <div>
+                  <textarea
+                    value={response}
+                    onChange={(e) => setResponse(e.target.value)}
+                    placeholder="e.g. I would advance the b-pawn to create a weakness on the queenside..."
+                    rows={5}
+                    style={{
+                      width: "100%", padding: "13px 15px",
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.11)",
+                      borderRadius: 5, color: "#e8e0d0",
+                      fontSize: 16.5, lineHeight: 1.6,
+                      fontFamily: "'Crimson Pro', Georgia, serif",
+                      resize: "vertical", outline: "none",
+                      marginBottom: 12,
+                      transition: "border-color 0.15s",
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = "rgba(200,168,75,0.5)"}
+                    onBlur={(e) => e.target.style.borderColor = "rgba(255,255,255,0.11)"}
+                  />
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!response.trim() || !modelReady || evaluating}
+                    style={{
+                      width: "100%", padding: "13px",
+                      background: response.trim() && modelReady && !evaluating
+                        ? "#c8a84b" : "rgba(200,168,75,0.18)",
+                      color: response.trim() && modelReady && !evaluating
+                        ? "#141210" : "rgba(255,255,255,0.25)",
+                      border: "none", borderRadius: 5, fontSize: 15.5, fontWeight: 700,
+                      letterSpacing: "0.08em", fontFamily: "inherit",
+                      cursor: response.trim() && modelReady && !evaluating ? "pointer" : "not-allowed",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {evaluating ? "Evaluating..." : !modelReady ? "Loading model..." : "Submit Plan"}
+                  </button>
+                </div>
+              )}
+
+              {/* Results */}
+              {submitted && results && (
+                <div>
+                  {/* Pass/fail banner */}
+                  <div style={{
+                    padding: "16px 18px", borderRadius: 5, marginBottom: 18,
+                    background: results.passed ? "rgba(72,187,120,0.11)" : "rgba(252,129,74,0.11)",
+                    borderLeft: `3px solid ${results.passed ? "#48bb78" : "#fc814a"}`,
+                  }}>
+                    <span style={{
+                      display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700,
+                      letterSpacing: "0.1em", textTransform: "uppercase",
+                      color: results.passed ? "#68d391" : "#fc8181",
+                    }}>
+                      {results.passed ? "Good plan!" : "Not quite there —"}
+                    </span>
+                    <p style={{
+                      fontSize: 16.5, lineHeight: 1.75,
+                      color: "rgba(224,212,192,0.82)", margin: 0, fontWeight: 300,
+                    }}>
+                      {puzzle.explanation}
+                    </p>
+                  </div>
+
+                  {/* Concept breakdown */}
+                  <div style={{ marginBottom: 18 }}>
+                    <p style={{
+                      fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.35)", marginBottom: 10,
+                    }}>
+                      Key concepts
+                    </p>
+                    {results.matches.map((m, i) => (
+                      <div key={i} style={{
+                        display: "flex", alignItems: "flex-start", gap: 10,
+                        marginBottom: 8, opacity: m.matched ? 1 : 0.5,
+                      }}>
+                        <span style={{
+                          flexShrink: 0, fontSize: 14, marginTop: 2,
+                          color: m.matched ? "#68d391" : "#fc8181",
+                        }}>
+                          {m.matched ? "✓" : "✗"}
+                        </span>
+                        <span style={{
+                          fontSize: 15, lineHeight: 1.6,
+                          color: m.matched ? "rgba(154,230,180,0.85)" : "rgba(224,212,192,0.5)",
+                          fontStyle: "italic",
+                        }}>
+                          {m.concept}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Navigation */}
+                  {!isLast ? (
+                    <button onClick={next} className="next-btn" style={{
+                      width: "100%", padding: "13px", background: "transparent", color: "#c8a84b",
+                      border: "1px solid rgba(200,168,75,0.5)", borderRadius: 5, fontSize: 15.5,
+                      letterSpacing: "0.06em", fontFamily: "inherit", cursor: "pointer",
+                    }}>
+                      Next Puzzle →
+                    </button>
+                  ) : (
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{
+                        color: "rgba(255,255,255,0.35)", fontSize: 15.5,
+                        marginBottom: 14, fontStyle: "italic", fontWeight: 300,
+                      }}>
+                        You've worked through all {puzzles.length} puzzles. Well played.
+                      </p>
+                      <button onClick={restart} className="next-btn" style={{
+                        width: "100%", padding: "13px", background: "transparent", color: "#c8a84b",
+                        border: "1px solid rgba(200,168,75,0.5)", borderRadius: 5, fontSize: 15.5,
+                        letterSpacing: "0.06em", fontFamily: "inherit", cursor: "pointer",
+                      }}>
+                        Start Over
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Lichess link */}
+                  <a
+                    href={`https://lichess.org/analysis/fromPosition/${puzzle.fen.replace(/ /g, "_")}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "block", textAlign: "center",
+                      marginTop: 12, fontSize: 13,
+                      color: "rgba(255,255,255,0.35)",
+                      letterSpacing: "0.06em",
+                      textDecoration: "none",
+                      transition: "color 0.2s",
+                    }}
+                    onMouseEnter={e => e.target.style.color = "rgba(255,255,255,0.7)"}
+                    onMouseLeave={e => e.target.style.color = "rgba(255,255,255,0.35)"}
+                  >
+                    Analyse on Lichess ↗
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ============================================================
 // App — screen router
 // ============================================================
 export default function App() {
@@ -709,8 +1046,9 @@ export default function App() {
     });
   }, []);
 
-  function goPlay() { setKey((k) => k + 1); setScreen("puzzle"); }
-  function goHome() { setKey((k) => k + 1); setScreen("home"); }
+  function goPlay()     { setKey((k) => k + 1); setScreen("puzzle"); }
+  function goOpenEnded(){ setKey((k) => k + 1); setScreen("openended"); }
+  function goHome()     { setKey((k) => k + 1); setScreen("home"); }
 
   if (loading) return (
     <div style={{
@@ -723,6 +1061,7 @@ export default function App() {
     </div>
   );
 
-  if (screen === "home") return <HomePage key={key} onPlay={goPlay} puzzles={puzzles} />;
+  if (screen === "home")     return <HomePage key={key} onPlay={goPlay} onOpenEnded={goOpenEnded} puzzles={puzzles} />;
+  if (screen === "openended") return <OpenEndedPuzzlePage key={key} onHome={goHome} puzzles={puzzles} />;
   return <PuzzlePage key={key} onHome={goHome} puzzles={puzzles} />;
 }
